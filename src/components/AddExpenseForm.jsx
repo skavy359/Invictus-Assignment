@@ -1,0 +1,233 @@
+import { useMemo, useState } from "react";
+import { percentsSumTo100 } from "../lib/money.js";
+
+const CATEGORIES = ["Food", "Travel", "Fun", "Stay"];
+
+function evenPercents(ids) {
+  if (!ids.length) return {};
+  const base = Number((100 / ids.length).toFixed(2));
+  const pcts = {};
+  ids.forEach((id, i) => {
+    pcts[id] = i === ids.length - 1 ? Number((100 - base * (ids.length - 1)).toFixed(2)) : base;
+  });
+  return pcts;
+}
+
+export default function AddExpenseForm({ members, onAdd }) {
+  const today = new Date();
+  const todayIso = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
+
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidBy, setPaidBy] = useState(members[0]?.id ?? "");
+  const [date, setDate] = useState(todayIso);
+  const [category, setCategory] = useState("Food");
+  const [splitType, setSplitType] = useState("equal");
+  const [splitWith, setSplitWith] = useState(members.map((m) => m.id));
+  const [percents, setPercents] = useState(evenPercents(members.map((m) => m.id)));
+  const [error, setError] = useState("");
+
+  const normalizedSplitWith = useMemo(
+    () => [...new Set([...splitWith.map(Number), Number(paidBy)])].filter(Boolean),
+    [splitWith, paidBy]
+  );
+
+  const selected = useMemo(
+    () => members.filter((m) => normalizedSplitWith.includes(m.id)),
+    [members, normalizedSplitWith]
+  );
+
+  function handlePayerChange(nextPaidBy) {
+    const payerId = Number(nextPaidBy);
+    setPaidBy(nextPaidBy);
+    setSplitWith((prev) => {
+      if (prev.includes(payerId)) return prev;
+      const next = [...prev, payerId];
+      setPercents(evenPercents(next));
+      return next;
+    });
+  }
+
+  function toggleMember(id) {
+    const memberId = Number(id);
+    if (memberId === Number(paidBy)) return;
+
+    setSplitWith((prev) => {
+      const next = prev.includes(memberId)
+        ? prev.filter((x) => Number(x) !== memberId)
+        : [...prev, memberId];
+      setPercents(evenPercents(next));
+      return next;
+    });
+  }
+
+  function submit(e) {
+    e.preventDefault();
+    setError("");
+    const n = Number(amount);
+    const selectedDate = new Date(`${date}T00:00:00`);
+    const todayAtStart = new Date(`${todayIso}T00:00:00`);
+
+    if (!description.trim() || !Number.isFinite(n) || n <= 0) {
+      setError("Add a description and a positive amount.");
+      return;
+    }
+    if (!date || selectedDate > todayAtStart) {
+      setError("Choose a valid date that is not in the future.");
+      return;
+    }
+    if (!normalizedSplitWith.length) {
+      setError("Pick at least one person to split with.");
+      return;
+    }
+    if (splitType === "percent" && !percentsSumTo100(percents)) {
+      setError("Percentages must add to 100.");
+      return;
+    }
+
+    onAdd({
+      description: description.trim(),
+      amount: n,
+      paidBy: Number(paidBy),
+      splitType,
+      splitWith: normalizedSplitWith.map(Number),
+      percents: splitType === "percent" ? percents : undefined,
+      date: selectedDate,
+      category,
+    });
+  }
+
+  return (
+    <section className="card">
+      <h2>Add expense</h2>
+      <form onSubmit={submit}>
+        <div className="row">
+          <div className="field" style={{ flex: 2 }}>
+            <label htmlFor="desc">Description</label>
+            <input
+              id="desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What was this for?"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="amt">Amount</label>
+            <input
+              id="amt"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              inputMode="decimal"
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <div className="field">
+            <label htmlFor="payer">Paid by</label>
+            <select
+              id="payer"
+              value={paidBy}
+              onChange={(e) => handlePayerChange(e.target.value)}
+            >
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="date">Date</label>
+            <input
+              id="date"
+              type="date"
+              value={date}
+              max={todayIso}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="cat">Category</label>
+            <select
+              id="cat"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <div className="legend">Split between</div>
+          <div className="chips" style={{ marginTop: 6 }}>
+            {members.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={`chip ${splitWith.includes(m.id) ? "on" : ""}`}
+                onClick={() => toggleMember(m.id)}
+              >
+                {m.name.split(" ")[0]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 12 }}>
+          <label className="check">
+            <input
+              type="radio"
+              name="splitType"
+              checked={splitType === "equal"}
+              onChange={() => setSplitType("equal")}
+            />
+            Split equally
+          </label>
+          <label className="check">
+            <input
+              type="radio"
+              name="splitType"
+              checked={splitType === "percent"}
+              onChange={() => {
+                setSplitType("percent");
+                setPercents(evenPercents(splitWith));
+              }}
+            />
+            Custom %
+          </label>
+        </div>
+
+        {splitType === "percent" && (
+          <div className="percent-grid">
+            {selected.map((m) => (
+              <div className="percent-row" key={m.id}>
+                <span>{m.name}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={percents[m.id] ?? ""}
+                  onChange={(e) =>
+                    setPercents((p) => ({ ...p, [m.id]: Number(e.target.value) }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+        <div style={{ marginTop: 12 }}>
+          <button className="btn" type="submit">
+            Save expense
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
